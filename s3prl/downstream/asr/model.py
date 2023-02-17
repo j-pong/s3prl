@@ -179,3 +179,101 @@ class Wav2Letter(nn.Module):
         """
         x = self.acoustic_model(x.transpose(1, 2).contiguous())
         return x.transpose(1, 2).contiguous(), x_len // self.downsample_rate
+
+from functools import partial
+
+import torch.nn.functional as F
+
+from fairseq.models.speech_to_text.utils import lengths_to_padding_mask
+
+from .fairseq_modules import AltBlock, RK2Block
+
+def Linear(in_features, out_features, bias=True):
+    m = nn.Linear(in_features, out_features, bias)
+    nn.init.xavier_uniform_(m.weight)
+    if bias:
+        nn.init.constant_(m.bias, 0.0)
+    return m
+
+class CA(nn.Module):
+    def __init__(self, 
+        embed_dim,
+        target_dim,
+        upstream_rate,
+        sample_style='concat', # end of s3prl
+        depth=3,
+        total_rate = 320,
+        observed_depth = 13,
+        temp=0.7, 
+        loss_scale=1e-4,
+        num_heads=12,
+        mlp_ratio=4.0,
+        encoder_dropout=0.0,
+        attention_dropout=0.0,
+        activation_dropout=0.1,
+        post_mlp_drop=0.0,
+        layer_norm_first=False,
+        end_of_block_targets=False
+    ):
+        super(CA, self).__init__()
+
+        self.sample_rate = 1 if total_rate == -1 else round(total_rate / upstream_rate)
+        self.sample_style = sample_style
+        if sample_style == 'concat':
+            embed_dim *= self.sample_rate
+
+        self.depth = depth
+        self.temp = temp
+        self.loss_scale = loss_scale
+
+        make_layer_norm = partial(
+            nn.LayerNorm, 
+            eps=1e-5, 
+            elementwise_affine=True
+        )
+        
+        def make_rk2_block(drop_path=0.0, dim=None, heads=None):
+            return RK2Block(
+                embed_dim if dim is None else dim,
+                num_heads if heads is None else heads,
+                mlp_ratio,
+                qkv_bias=True,
+                drop=encoder_dropout,
+                attn_drop=attention_dropout,
+                mlp_drop=activation_dropout,
+                post_mlp_drop=post_mlp_drop,
+                drop_path=drop_path,
+                norm_layer=make_layer_norm,
+                layer_norm_first=layer_norm_first,
+                ffn_targets=not end_of_block_targets,
+            )
+
+        self.observsed_depth = observed_depth
+        self.blocks = nn.ModuleList([make_rk2_block() for _ in range(self.depth)])
+        self.projs = Linear(embed_dim, target_dim)
+
+    def forward(
+        self,
+        x,
+        x_len
+    ):
+        # Perform Downsampling
+        if self.sample_rate > 1:
+            x, x_len = downsample(x, x_len, self.sample_rate, self.sample_style)
+        
+        with torch.no_grad():
+            padding_mask = lengths_to_padding_mask(x_len).to(x.device)
+
+        for i, blk in enumerate(self.blocks):
+            args = {
+                "x" : x, 
+                "padding_mask": padding_mask, 
+            }
+            x = blk(**args)
+
+            if isinstance(x, tuple):
+                x, lr = x
+
+        logits = self.projs(lr)
+
+        return logits, x_len
