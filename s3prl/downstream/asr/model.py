@@ -249,7 +249,12 @@ class CA(nn.Module):
             )
 
         self.observsed_depth = observed_depth
+
         self.blocks = nn.ModuleList([make_rk2_block() for _ in range(self.depth)])
+
+        self.alpha0 = nn.Parameter(torch.zeros(observed_depth))
+        self.alphas = nn.Parameter(torch.zeros(depth, observed_depth + 1))
+
         self.projs = Linear(embed_dim, target_dim)
 
     def forward(
@@ -261,18 +266,34 @@ class CA(nn.Module):
         if self.sample_rate > 1:
             x, x_len = downsample(x, x_len, self.sample_rate, self.sample_style)
         
+        # Recover the representation 
         with torch.no_grad():
+            aug_bsz, tsz, chsz = x.size()
+
+            x_orig = x.reshape(self.observsed_depth, int(aug_bsz / self.observsed_depth), tsz, chsz)
+            x_len = x_len.reshape(self.observsed_depth, int(aug_bsz / self.observsed_depth))
+            x_len = x_len[0] # NOTE: if iter loss is used, we use whole lengths
+
             padding_mask = lengths_to_padding_mask(x_len).to(x.device)
 
+        # Set the initial state of representation model
+        _, *origin_shape = x_orig.shape
+        alpha0 = F.softmax(self.alpha0 / self.temp, dim=-1)
+        x = (alpha0.unsqueeze(-1) * x.view(self.observsed_depth, -1)).sum(dim=0)
+        x = x.view(*origin_shape)
+
         for i, blk in enumerate(self.blocks):
-            args = {
-                "x" : x, 
-                "padding_mask": padding_mask, 
-            }
+            args = {"x" : x, "padding_mask": padding_mask}
             x = blk(**args)
 
             if isinstance(x, tuple):
                 x, lr = x
+
+            x = torch.cat([x_orig, x.unsqueeze(0)], dim=0)
+
+            alpha = F.softmax(self.alphas[0] / self.temp, dim=-1)
+            x = (alpha.unsqueeze(-1) * x.view(self.observsed_depth + 1, -1)).sum(dim=0)
+            x = x.view(*origin_shape)
 
         logits = self.projs(lr)
 
