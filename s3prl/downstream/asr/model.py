@@ -180,6 +180,7 @@ class Wav2Letter(nn.Module):
         x = self.acoustic_model(x.transpose(1, 2).contiguous())
         return x.transpose(1, 2).contiguous(), x_len // self.downsample_rate
 
+import math
 from functools import partial
 
 import torch.nn.functional as F
@@ -253,7 +254,7 @@ class CA(nn.Module):
         self.blocks = nn.ModuleList([make_rk2_block() for _ in range(self.depth)])
 
         self.alpha0 = nn.Parameter(torch.zeros(observed_depth))
-        self.alphas = nn.Parameter(torch.zeros(depth, observed_depth + 1))
+        self.alphas = nn.Parameter(torch.zeros(depth-1, observed_depth + 1))
 
         self.projs = Linear(embed_dim, target_dim)
 
@@ -289,12 +290,28 @@ class CA(nn.Module):
             if isinstance(x, tuple):
                 x, lr = x
 
-            x = torch.cat([x_orig, x.unsqueeze(0)], dim=0)
+            if i < (len(self.blocks) - 1):
+                x = torch.cat([x_orig, x.unsqueeze(0)], dim=0)
 
-            alpha = F.softmax(self.alphas[0] / self.temp, dim=-1)
-            x = (alpha.unsqueeze(-1) * x.view(self.observsed_depth + 1, -1)).sum(dim=0)
-            x = x.view(*origin_shape)
-
+                alpha = F.softmax(self.alphas[0] / self.temp, dim=-1)
+                x = (alpha.unsqueeze(-1) * x.view(self.observsed_depth + 1, -1)).sum(dim=0)
+                x = x.view(*origin_shape)
+        
         logits = self.projs(lr)
 
-        return logits, x_len
+        return logits, x_len, self.d2v_loss(x, x_orig[0].detach().clone()).sum()
+
+    def d2v_loss(self, x, y):
+        x = x.view(-1, x.size(-1)).float()
+        y = y.view(-1, x.size(-1))
+
+        loss = F.mse_loss(x, y, reduction="none")
+
+        if self.loss_scale is not None:
+            scale = self.loss_scale
+        else:
+            scale = 1 / math.sqrt(x.size(-1))
+
+        reg_loss = loss * scale
+
+        return reg_loss
