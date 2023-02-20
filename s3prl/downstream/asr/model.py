@@ -207,6 +207,7 @@ class CA(nn.Module):
         observed_depth = 13,
         temp=0.7, 
         loss_scale=1e-4,
+        iter_loss=False,
         num_heads=12,
         mlp_ratio=4.0,
         encoder_dropout=0.0,
@@ -250,13 +251,13 @@ class CA(nn.Module):
             )
 
         self.observsed_depth = observed_depth
-
         self.blocks = nn.ModuleList([make_rk2_block() for _ in range(self.depth)])
-
         self.alpha0 = nn.Parameter(torch.zeros(observed_depth))
-        self.alphas = nn.Parameter(torch.zeros(depth-1, observed_depth + 1))
-
-        self.projs = Linear(embed_dim, target_dim)
+        if iter_loss:
+            self.projs = nn.ModuleList([Linear(embed_dim, target_dim) for _ in range(self.depth)])
+        else:
+            self.projs = Linear(embed_dim, target_dim)
+        self.iter_loss = iter_loss
 
     def forward(
         self,
@@ -270,10 +271,10 @@ class CA(nn.Module):
         # Recover the representation 
         with torch.no_grad():
             aug_bsz, tsz, chsz = x.size()
+            bsz = int(aug_bsz / self.observsed_depth)
 
-            x_orig = x.reshape(self.observsed_depth, int(aug_bsz / self.observsed_depth), tsz, chsz)
-            x_len = x_len.reshape(self.observsed_depth, int(aug_bsz / self.observsed_depth))
-            x_len = x_len[0] # NOTE: if iter loss is used, we use whole lengths
+            x_orig = x.reshape(self.observsed_depth, bsz, tsz, chsz)
+            x_len = x_len.reshape(self.observsed_depth, bsz)[0]
 
             padding_mask = lengths_to_padding_mask(x_len).to(x.device)
 
@@ -283,35 +284,24 @@ class CA(nn.Module):
         x = (alpha0.unsqueeze(-1) * x.view(self.observsed_depth, -1)).sum(dim=0)
         x = x.view(*origin_shape)
 
+        # Solving the path
+        xs = []
         for i, blk in enumerate(self.blocks):
             args = {"x" : x, "padding_mask": padding_mask}
             x = blk(**args)
 
             if isinstance(x, tuple):
                 x, lr = x
+            
+            if self.iter_loss:
+                xs.append(self.projs[i](lr))
 
-            if i < (len(self.blocks) - 1):
-                x = torch.cat([x_orig, x.unsqueeze(0)], dim=0)
-
-                alpha = F.softmax(self.alphas[0] / self.temp, dim=-1)
-                x = (alpha.unsqueeze(-1) * x.view(self.observsed_depth + 1, -1)).sum(dim=0)
-                x = x.view(*origin_shape)
-        
-        logits = self.projs(lr)
-
-        return logits, x_len, self.d2v_loss(x, x_orig[0].detach().clone()).sum()
-
-    def d2v_loss(self, x, y):
-        x = x.view(-1, x.size(-1)).float()
-        y = y.view(-1, x.size(-1))
-
-        loss = F.mse_loss(x, y, reduction="none")
-
-        if self.loss_scale is not None:
-            scale = self.loss_scale
+        if self.iter_loss:
+            logits = torch.cat(xs, dim=0) if self.training else xs[-1]
+            x_len = x_len.repeat(self.depth) if self.training else x_len
+            n_clone = self.depth if self.training else 1
         else:
-            scale = 1 / math.sqrt(x.size(-1))
+            logits = self.projs(lr)
+            n_clone = 1
 
-        reg_loss = loss * scale
-
-        return reg_loss
+        return logits, x_len, None, n_clone 

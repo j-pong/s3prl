@@ -202,12 +202,13 @@ class DownstreamExpert(nn.Module):
         features_len = torch.IntTensor([len(feat) for feat in features])
         features = pad_sequence(features, batch_first=True).to(device=device)
         features = self.projector(features)
-        logits, log_probs_len, model_loss = self.model(features, features_len)
+        logits, log_probs_len, model_loss, n_clone = self.model(features, features_len)
         log_probs = nn.functional.log_softmax(logits, dim=-1)
-        return log_probs, log_probs_len, model_loss
+        return log_probs, log_probs_len, model_loss, n_clone
 
     def inference(self, features, filenames):
-        log_probs, log_probs_len, _ = self._get_log_probs(features)
+        log_probs, log_probs_len, _, n_clone = self._get_log_probs(features)
+        assert n_clone == 1
         _, pred_words_batch = self._decode(log_probs.float().contiguous().cpu(), log_probs_len)
         hyps = [' '.join(hyp) for hyp in pred_words_batch]
 
@@ -252,9 +253,11 @@ class DownstreamExpert(nn.Module):
                 the loss to be optimized, should not be detached
                 a single scalar in torch.FloatTensor
         """
-        log_probs, log_probs_len, model_loss = self._get_log_probs(features)
+        log_probs, log_probs_len, model_loss, n_clone = self._get_log_probs(features)
         device = features[0].device
         labels = [torch.IntTensor(l) for l in labels]
+        if n_clone > 1:
+            labels = labels * n_clone
         labels_len = torch.IntTensor([len(label) for label in labels]).to(device=device)
         labels = pad_sequence(
             labels,
@@ -271,6 +274,16 @@ class DownstreamExpert(nn.Module):
         if model_loss is not None:
             loss = loss + model_loss
         records['loss'].append(loss.item())
+
+        # for decoding we leverage the just last layer outputs
+        if n_clone > 1:
+            bsz = log_probs.size(0)
+
+            log_probs = log_probs[-int(bsz / n_clone):]
+            log_probs_len = log_probs_len[-int(bsz / n_clone):]
+
+            labels = labels[-int(bsz / n_clone):]
+            labels_len = labels_len[-int(bsz / n_clone):]
 
         target_tokens_batch = []
         target_words_batch = []
