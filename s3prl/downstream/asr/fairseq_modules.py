@@ -356,7 +356,7 @@ class RK2Block(nn.Module):
 
         self.gate_linear = nn.Linear(2 * dim, 1)
 
-    def forward(self, x, padding_mask=None, alibi_bias=None, bypassing_CA1=False):
+    def forward(self, x, padding_mask=None, alibi_bias=None):
         # 1. DG
         x1 = self.drop_path(self.attn(self.norm1(x), padding_mask, alibi_bias))
 
