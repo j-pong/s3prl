@@ -88,6 +88,8 @@ class RNNs(nn.Module):
         sample_rate,
         sample_style,
         total_rate = 320,
+        observed_depth = 13,
+        temp=0.7
     ):
         super(RNNs, self).__init__()
         latest_size = input_size
@@ -113,6 +115,10 @@ class RNNs(nn.Module):
             latest_size = rnn_layer.out_dim
 
         self.linear = nn.Linear(latest_size, output_size)
+
+        self.temp = temp
+        self.observsed_depth = observed_depth
+        self.alpha0 = nn.Parameter(torch.zeros(observed_depth))
     
     def forward(self, x, x_len):
         r"""
@@ -122,15 +128,29 @@ class RNNs(nn.Module):
         Returns:
             Tensor: Predictor tensor of dimension (batch_size, input_length, number_of_classes).
         """
+        # Recover the representation 
+        with torch.no_grad():
+            aug_bsz, tsz, chsz = x.size()
+            bsz = int(aug_bsz / self.observsed_depth)
+
+            x_orig = x.view(self.observsed_depth, bsz, tsz, chsz)
+            x_len = x_len.view(self.observsed_depth, bsz)[0]
+
         # Perform Downsampling
         if self.sample_rate > 1:
             x, x_len = downsample(x, x_len, self.sample_rate, self.sample_style)
+        
+        # Set the initial state of representation model
+        _, *origin_shape = x_orig.shape
+        alpha0 = F.softmax(self.alpha0 / self.temp, dim=-1)
+        x = (alpha0.unsqueeze(-1) * x.view(self.observsed_depth, -1)).sum(dim=0)
+        x = x.view(*origin_shape)
 
         for rnn in self.rnns:
             x, x_len = rnn(x, x_len)
 
         logits = self.linear(x)
-        return logits, x_len        
+        return logits, x_len, None, 1 
 
 
 class Wav2Letter(nn.Module):
@@ -264,19 +284,20 @@ class CA(nn.Module):
         x,
         x_len
     ):
-        # Perform Downsampling
-        if self.sample_rate > 1:
-            x, x_len = downsample(x, x_len, self.sample_rate, self.sample_style)
         
         # Recover the representation 
         with torch.no_grad():
             aug_bsz, tsz, chsz = x.size()
             bsz = int(aug_bsz / self.observsed_depth)
 
-            x_orig = x.reshape(self.observsed_depth, bsz, tsz, chsz)
-            x_len = x_len.reshape(self.observsed_depth, bsz)[0]
+            x_orig = x.view(self.observsed_depth, bsz, tsz, chsz)
+            x_len = x_len.view(self.observsed_depth, bsz)[0]
 
             padding_mask = lengths_to_padding_mask(x_len).to(x.device)
+        
+        # Perform Downsampling
+        if self.sample_rate > 1:
+            x, x_len = downsample(x, x_len, self.sample_rate, self.sample_style)
 
         # Set the initial state of representation model
         _, *origin_shape = x_orig.shape
