@@ -356,45 +356,17 @@ class RK2Block(nn.Module):
 
         self.gate_linear = nn.Linear(2 * dim, 1)
 
-        # # For CA1
-        # self.norm1_ = norm_layer(dim)
-        # self.attn_ = AltAttention(
-        #     dim,
-        #     num_heads=num_heads,
-        #     qkv_bias=qkv_bias,
-        #     qk_scale=qk_scale,
-        #     attn_drop=attn_drop,
-        #     proj_drop=drop,
-        #     cosine_attention=cosine_attention,
-        # )
-
-        # self.norm2_ = norm_layer(dim)
-        # self.mlp_ = Mlp(
-        #     in_features=dim,
-        #     hidden_features=mlp_hidden_dim,
-        #     act_layer=act_layer,
-        #     drop=mlp_drop,
-        # )
-
     def forward(self, x, padding_mask=None, alibi_bias=None, bypassing_CA1=False):
         # 1. DG
-        x1 = x + self.drop_path(self.attn(self.norm1(x), padding_mask, alibi_bias))
-        x1 = self.mlp(self.norm2(x1))
+        x1 = self.drop_path(self.attn(self.norm1(x), padding_mask, alibi_bias))
 
         # 2. CA3
         # NOTE: we will add the contextualized information to the model
-        x2 = x + self.drop_path(self.attn(self.norm1(x1), padding_mask, alibi_bias))
-        x2 = self.mlp(self.norm2(x2))
+        x2 = self.drop_path(self.attn(self.norm1(x1 + x), padding_mask, alibi_bias))
 
         gamma = torch.sigmoid(self.gate_linear(torch.cat((x1, x2), dim=-1)))
-        x = gamma * x1 + gamma * x2
-        x + self.drop_path(self.post_mlp_dropout(x))
-
-        # 3. CA1
-        # if bypassing_CA1:
-        #     x = x + self.drop_path(self.attn_(x, padding_mask, alibi_bias))
-        #     r = x = self.norm1_(x)
-        #     x = self.mlp(x)
-        #     x = self.norm2_(r + self.drop_path(self.post_mlp_dropout(x))) 
+        x = (1 - gamma) * x1 + gamma * x2  + x
+        r = x = self.mlp(self.norm2(x))
+        x = r + self.drop_path(self.post_mlp_dropout(x))
 
         return x, x2
