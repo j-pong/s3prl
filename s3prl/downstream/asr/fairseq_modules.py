@@ -354,8 +354,6 @@ class RK2Block(nn.Module):
         )
         self.post_mlp_dropout = nn.Dropout(post_mlp_drop, inplace=False)
 
-        self.gate_linear = nn.Linear(2 * dim, 1)
-
     def forward(self, x, padding_mask=None, alibi_bias=None):
         # 1. DG
         x1 = self.drop_path(self.attn(self.norm1(x), padding_mask, alibi_bias))
@@ -364,8 +362,7 @@ class RK2Block(nn.Module):
         # NOTE: we will add the contextualized information to the model
         x2 = self.drop_path(self.attn(self.norm1(x1 + x), padding_mask, alibi_bias))
 
-        gamma = torch.sigmoid(self.gate_linear(torch.cat((x1, x2), dim=-1)))
-        x = (1 - gamma) * x1 + gamma * x2  + x
+        x = 0.5 * x1 + 0.5 * x2 + x
         r = x = self.mlp(self.norm2(x))
         x = r + self.drop_path(self.post_mlp_dropout(x))
 
