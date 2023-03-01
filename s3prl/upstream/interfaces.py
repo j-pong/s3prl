@@ -143,6 +143,8 @@ class Featurizer(nn.Module):
     ):
         super().__init__()
         self.name = "Featurizer"
+        self.sbp = kwargs["featurizer"]["selection_by_prior"]
+        self.temp = kwargs["featurizer"]["temp"]
 
         upstream.eval()
         paired_wavs = [torch.randn(SAMPLE_RATE).to(upstream_device)]
@@ -213,6 +215,8 @@ class Featurizer(nn.Module):
 
         if isinstance(feature, (list, tuple)) and isinstance(self.layer_selection, int):
             feature = feature[self.layer_selection]
+        
+        feature = [feature[i] for i in self.sbp]
 
         return feature
 
@@ -243,7 +247,7 @@ class Featurizer(nn.Module):
 
         _, *origin_shape = stacked_feature.shape
         stacked_feature = stacked_feature.view(self.layer_num, -1)
-        norm_weights = F.softmax(self.weights, dim=-1)
+        norm_weights = F.softmax(self.weights / self.temp, dim=-1)
         weighted_feature = (norm_weights.unsqueeze(-1) * stacked_feature).sum(dim=0)
         weighted_feature = weighted_feature.view(*origin_shape)
 
