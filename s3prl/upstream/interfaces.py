@@ -172,14 +172,14 @@ class Featurizer(nn.Module):
         feature = self._select_feature(paired_features)
         if isinstance(feature, (list, tuple)):
             self.layer_num = len(feature)
-            # show(
-            #     f"[{self.name}] - Take a list of {self.layer_num} features and weighted sum them.",
-            #     file=sys.stderr,
-            # )
-            # self.weights = nn.Parameter(torch.zeros(self.layer_num))
-            # feature = self._weighted_sum([f.cpu() for f in feature])
-            feature = [f.cpu() for f in feature]
-            feature = feature[0]
+            show(
+                f"[{self.name}] - Take a list of {self.layer_num} features and weighted sum them.",
+                file=sys.stderr,
+            )
+            self.weights = nn.Parameter(torch.zeros(self.layer_num))
+            feature = self._weighted_sum([f.cpu() for f in feature])
+            # feature = [f.cpu() for f in feature]
+            # feature = feature[0]
         else:
             feature = feature.cpu()
 
@@ -269,12 +269,17 @@ class Featurizer(nn.Module):
     ):
         feature = self._select_feature(paired_features)
 
-        assert len(feature) > 1
-        stacked_feature = torch.stack(feature, dim=0)
-        if self.normalize:
-            stacked_feature = F.layer_norm(
-                stacked_feature, (stacked_feature.shape[-1],)
-            )
-        feature = stacked_feature.flatten(start_dim=0, end_dim=1)
+        if isinstance(feature, (list, tuple)):
+            feature = self._weighted_sum(feature)
 
-        return self.tolist(paired_wavs * self.layer_num, feature)
+        return self.tolist(paired_wavs, feature)
+
+        # assert len(feature) > 1
+        # stacked_feature = torch.stack(feature, dim=0)
+        # if self.normalize:
+        #     stacked_feature = F.layer_norm(
+        #         stacked_feature, (stacked_feature.shape[-1],)
+        #     )
+        # feature = stacked_feature.flatten(start_dim=0, end_dim=1)
+
+        # return self.tolist(paired_wavs * self.layer_num, feature)

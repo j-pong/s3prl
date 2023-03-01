@@ -272,7 +272,7 @@ class CA(nn.Module):
 
         self.observsed_depth = observed_depth
         self.blocks = nn.ModuleList([make_rk2_block() for _ in range(self.depth)])
-        self.alpha0 = nn.Parameter(torch.zeros(observed_depth))
+        # self.alpha0 = nn.Parameter(torch.zeros(observed_depth))
         if iter_loss:
             self.projs = nn.ModuleList([Linear(embed_dim, target_dim) for _ in range(self.depth)])
         else:
@@ -285,13 +285,13 @@ class CA(nn.Module):
         x_len
     ):
         
-        # Recover the representation 
+        # # Recover the representation 
         with torch.no_grad():
-            aug_bsz, tsz, chsz = x.size()
-            bsz = int(aug_bsz / self.observsed_depth)
+        #     aug_bsz, tsz, chsz = x.size()
+        #     bsz = int(aug_bsz / self.observsed_depth)
 
-            x_orig = x.view(self.observsed_depth, bsz, tsz, chsz)
-            x_len = x_len.view(self.observsed_depth, bsz)[0]
+        #     x_orig = x.view(self.observsed_depth, bsz, tsz, chsz)
+        #     x_len = x_len.view(self.observsed_depth, bsz)[0]
 
             padding_mask = lengths_to_padding_mask(x_len).to(x.device)
         
@@ -299,11 +299,11 @@ class CA(nn.Module):
         if self.sample_rate > 1:
             x, x_len = downsample(x, x_len, self.sample_rate, self.sample_style)
 
-        # Set the initial state of representation model
-        _, *origin_shape = x_orig.shape
-        alpha0 = F.softmax(self.alpha0 / self.temp, dim=-1)
-        x = (alpha0.unsqueeze(-1) * x.view(self.observsed_depth, -1)).sum(dim=0)
-        x = x.view(*origin_shape)
+        # # Set the initial state of representation model
+        # _, *origin_shape = x_orig.shape
+        # alpha0 = F.softmax(self.alpha0 / self.temp, dim=-1)
+        # x = (alpha0.unsqueeze(-1) * x.view(self.observsed_depth, -1)).sum(dim=0)
+        # x = x.view(*origin_shape)
 
         # Solving the path
         xs = []
