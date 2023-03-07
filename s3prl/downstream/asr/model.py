@@ -274,7 +274,7 @@ class CA(nn.Module):
         self.blocks = nn.ModuleList([make_rk2_block() for _ in range(self.depth)])
         # self.alpha0 = nn.Parameter(torch.zeros(observed_depth))
         if iter_loss:
-            self.projs = nn.ModuleList([Linear(embed_dim, target_dim) for _ in range(self.depth)])
+            self.projs = nn.ModuleList([Linear(embed_dim, target_dim) for _ in range(2)])
         else:
             self.projs = Linear(embed_dim, target_dim)
         self.iter_loss = iter_loss
@@ -307,20 +307,21 @@ class CA(nn.Module):
 
         # Solving the path
         xs = []
-        for i, blk in enumerate(self.blocks):
-            args = {"x" : x, "padding_mask": padding_mask}
-            x = blk(**args)
+        for j in range(2):
+            for i, blk in enumerate(self.blocks):
+                args = {"x" : x, "padding_mask": padding_mask}
+                x = blk(**args)
 
-            if isinstance(x, tuple):
-                x, lr = x
-            
+                if isinstance(x, tuple):
+                    x, lr = x
+                
             if self.iter_loss:
-                xs.append(self.projs[i](lr))
+                xs.append(self.projs[j](lr))
 
         if self.iter_loss:
             logits = torch.cat(xs, dim=0) if self.training else xs[-1]
             x_len = x_len.repeat(self.depth) if self.training else x_len
-            n_clone = self.depth if self.training else 1
+            n_clone = len(xs) if self.training else 1
         else:
             logits = self.projs(lr)
             n_clone = 1
