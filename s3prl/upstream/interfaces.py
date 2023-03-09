@@ -271,8 +271,6 @@ class Featurizer(nn.Module):
         weighted_feature = (norm_weights.unsqueeze(-1) * stacked_feature).sum(dim=0)
         weighted_feature = weighted_feature.view(*origin_shape)
 
-        print(self.num_updates)
-
         return weighted_feature
 
     def tolist(self, paired_wavs: List[Tensor], paired_feature: Tensor):
