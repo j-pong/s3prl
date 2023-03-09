@@ -143,11 +143,13 @@ class Featurizer(nn.Module):
     ):
         super().__init__()
         self.name = "Featurizer"
-        if "selection_by_prior" in kwargs["featuresize"]:
+
+        if "selection_by_prior" in kwargs["featurizer"]:
             self.sbp = kwargs["featurizer"]["selection_by_prior"]
         else:
             self.sbp = None
-        if "temp" in kwargs["featuresize"]:
+
+        if "temp" in kwargs["featurizer"]:
             self.temp = kwargs["featurizer"]["temp"]
         else:
             self.temp = 1.0
