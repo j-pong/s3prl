@@ -264,6 +264,7 @@ class Runner():
 
         batch_ids = []
         backward_steps = 0
+        update_steps = 0
         records = defaultdict(list)
         epoch = self.init_ckpt.get('Epoch', 0)
         train_split = self.config['runner'].get("train_dataloader", "train")
@@ -333,6 +334,8 @@ class Runner():
                     print(f'[Runner] - grad norm is NaN at step {global_step}')
                 else:
                     optimizer.step()
+                    update_steps += 1
+                    self.featurizer.model.set_num_updates(update_steps)
                 optimizer.zero_grad()
 
                 # adjust learning rate

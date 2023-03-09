@@ -154,6 +154,8 @@ class Featurizer(nn.Module):
         else:
             self.temp = 1.0
 
+        self.num_updates = 0
+
         upstream.eval()
         paired_wavs = [torch.randn(SAMPLE_RATE).to(upstream_device)]
         with torch.no_grad():
@@ -209,6 +211,17 @@ class Featurizer(nn.Module):
                 f" input waveforms v.s. the output features: {self.downsample_rate}",
                 file=sys.stderr,
             )
+    
+    def set_num_updates(self, num_updates):
+        # Sub modules's update
+        def _apply(m):
+            if hasattr(m, "set_num_updates") and m != self:
+                m.set_num_updates(num_updates)
+
+        self.apply(_apply)
+
+        # Module's update
+        self.num_updates = num_updates
 
     def _select_feature(self, features):
         feature = features.get(self.feature_selection)
@@ -257,6 +270,8 @@ class Featurizer(nn.Module):
         norm_weights = F.softmax(self.weights / self.temp, dim=-1)
         weighted_feature = (norm_weights.unsqueeze(-1) * stacked_feature).sum(dim=0)
         weighted_feature = weighted_feature.view(*origin_shape)
+
+        print(self.num_updates)
 
         return weighted_feature
 
