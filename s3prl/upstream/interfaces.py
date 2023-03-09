@@ -143,6 +143,8 @@ class Featurizer(nn.Module):
     ):
         super().__init__()
         self.name = "Featurizer"
+        self.sbp = kwargs["featurizer"]["selection_by_prior"]
+        self.temp = kwargs["featurizer"]["temp"]
 
         upstream.eval()
         paired_wavs = [torch.randn(SAMPLE_RATE).to(upstream_device)]
@@ -211,6 +213,8 @@ class Featurizer(nn.Module):
 
         if isinstance(feature, (list, tuple)) and isinstance(self.layer_selection, int):
             feature = feature[self.layer_selection]
+
+        feature = [feature[i] for i in self.sbp]
 
         return feature
 
